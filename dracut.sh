@@ -227,6 +227,7 @@ Creates initial ramdisk images for preloading modules
                          otherwise you will not be able to boot.
   --no-compress         Do not compress the generated initramfs.  This will
                          override any other compression options.
+  --cpio-reflink        Request that cpio perform reflinks for file data.
   --list-modules        List all available dracut modules.
   -M, --show-modules    Print included module's name to standard output during
                          build.
@@ -416,6 +417,7 @@ rearrange_params()
         --long zstd \
         --long no-compress \
         --long gzip \
+        --long cpio-reflink \
         --long list-modules \
         --long show-modules \
         --long keep \
@@ -620,6 +622,7 @@ while :; do
         --zstd)        compress_l="zstd";;
         --no-compress) _no_compress_l="cat";;
         --gzip)        compress_l="gzip";;
+        --cpio-reflink) cpio_reflink="yes";;
         --list-modules) do_list="yes";;
         -M|--show-modules)
                        show_modules_l="yes"
@@ -749,6 +752,25 @@ for f in $(dropindirs_sort ".conf" "$confdir" "$dracutbasedir/dracut.conf.d"); d
     # shellcheck disable=SC1090
     [[ -e $f ]] && . "$f"
 done
+
+if [[ $cpio_reflink == "yes" ]]; then
+    if [[ "$(cpio --help)" == *--reflink* ]]; then
+        # both XFS and Btrfs require data to be FS block-size aligned for proper
+        # extent sharing / reflinks. padcpio ensures this.
+        if [[ -d "$dracutbasedir/skipcpio" ]]; then
+            padcpio="$dracutbasedir/skipcpio/padcpio"
+        else
+            padcpio="$dracutbasedir/padcpio"
+        fi
+        if ! [[ -x $padcpio ]]; then
+            printf -- "--reflink requires the Dracut padcpio binary\n" >&2
+            exit 1
+        fi
+    else
+        dinfo "cpio-reflink ignored due to lack of support in $(which cpio)"
+        unset cpio_reflink
+    fi
+fi
 
 DRACUT_PATH=${DRACUT_PATH:-/sbin /bin /usr/sbin /usr/bin}
 
@@ -2106,6 +2128,8 @@ if [[ $kernel_only != yes ]]; then
 fi
 
 if [[ $do_strip = yes ]] && ! [[ $DRACUT_FIPS_MODE ]]; then
+    # warn that stripping files negates (dedup) benefits of using reflink
+    [ -n "$cpio_reflink" ] && dinfo "inefficient: strip is enabled alongside reflink"
     dinfo "*** Stripping files ***"
     find "$initdir" -type f \
         -executable -not -path '*/lib/modules/*.ko' -print0 \
@@ -2163,25 +2187,56 @@ if [[ $create_early_cpio = yes ]]; then
     fi
 
     # The microcode blob is _before_ the initramfs blob, not after
+    if [[ -n "$cpio_reflink" ]]; then
+        if ! (
+                umask 077; cd "$early_cpio_dir/d"
+                find . -print0 | sort -z | $padcpio --min 4k --align 4k \
+                    | cpio ${CPIO_REPRODUCIBLE:+--reproducible} --null \
+                        ${cpio_owner:+-R "$cpio_owner"} -H newc -o --quiet --reflink -O "${DRACUT_TMPDIR}/initramfs.img"
+            ); then
+            dfatal "dracut: creation of reflinked $outfile failed"
+            exit 1
+        fi
+    else
+      if ! (
+	      umask 077; cd "$early_cpio_dir/d"
+	      find . -print0 | sort -z \
+	          | cpio ${CPIO_REPRODUCIBLE:+--reproducible} --null \
+                      ${cpio_owner:+-R "$cpio_owner"} -H newc -o --quiet > "${DRACUT_TMPDIR}/initramfs.img"
+
+	  ); then
+	  dfatal "dracut: creation of $outfile failed"
+	  exit 1
+      fi
+    fi
+fi
+
+if [[ -n "$cpio_reflink" && "$compress" == "cat" ]]; then
+    # determine padding offset if we're appending to microcode
+    i=$(stat -c "%s" -- "${DRACUT_TMPDIR}/initramfs.img" 2>/dev/null)
     if ! (
-            umask 077; cd "$early_cpio_dir/d"
+            umask 077; cd "$initdir"
+            find . -print0 | sort -z \
+                | $padcpio --min 4k --align 4k ${i:+--offset "$i"} \
+                | cpio ${CPIO_REPRODUCIBLE:+--reproducible} --null \
+                       ${cpio_owner:+-R "$cpio_owner"} -H newc -o --quiet --reflink ${i:+--chain} \
+                       -O "${DRACUT_TMPDIR}/initramfs.img"
+        ); then
+        dfatal "dracut: creation of reflinked $outfile failed"
+        exit 1
+    fi
+else
+    [ -n "$cpio_reflink" ] && dinfo "cpio-reflink ignored due to compression"
+    if ! (
+            umask 077; cd "$initdir"
             find . -print0 | sort -z \
                 | cpio ${CPIO_REPRODUCIBLE:+--reproducible} --null \
-                    ${cpio_owner:+-R "$cpio_owner"} -H newc -o --quiet > "${DRACUT_TMPDIR}/initramfs.img"
+                    ${cpio_owner:+-R "$cpio_owner"} -H newc -o --quiet \
+                | $compress >> "${DRACUT_TMPDIR}/initramfs.img"
         ); then
         dfatal "dracut: creation of $outfile failed"
         exit 1
     fi
-fi
-
-if ! (
-        umask 077; cd "$initdir"
-        find . -print0 | sort -z \
-            | cpio ${CPIO_REPRODUCIBLE:+--reproducible} --null ${cpio_owner:+-R "$cpio_owner"} -H newc -o --quiet \
-            | $compress >> "${DRACUT_TMPDIR}/initramfs.img"
-    ); then
-    dfatal "dracut: creation of $outfile failed"
-    exit 1
 fi
 
 # shellcheck disable=SC2154
