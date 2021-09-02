@@ -226,7 +226,7 @@ Creates initial ramdisk images for preloading modules
                          otherwise you will not be able to boot.
   --no-compress         Do not compress the generated initramfs.  This will
                          override any other compression options.
-  --cpio-reflink        Attempt to reflink cpio file data using dracut-cpio.
+  --enhanced-cpio       Attempt to reflink cpio file data using dracut-cpio.
   --list-modules        List all available dracut modules.
   -M, --show-modules    Print included module's name to standard output during
                          build.
@@ -413,7 +413,7 @@ rearrange_params() {
             --long zstd \
             --long no-compress \
             --long gzip \
-            --long cpio-reflink \
+            --long enhanced-cpio \
             --long list-modules \
             --long show-modules \
             --long keep \
@@ -772,7 +772,7 @@ while :; do
         --zstd) compress_l="zstd" ;;
         --no-compress) _no_compress_l="cat" ;;
         --gzip) compress_l="gzip" ;;
-        --cpio-reflink) cpio_reflink="yes" ;;
+        --enhanced-cpio) enhanced_cpio_l="yes" ;;
         --list-modules) do_list="yes" ;;
         -M | --show-modules)
             show_modules_l="yes"
@@ -985,6 +985,7 @@ stdloglvl=$((stdloglvl + verbosity_mod_l))
 [[ $tmpdir ]] || tmpdir="$dracutsysrootdir"/var/tmp
 [[ $INITRD_COMPRESS ]] && compress=$INITRD_COMPRESS
 [[ $compress_l ]] && compress=$compress_l
+[[ $enhanced_cpio_l ]] && enhanced_cpio=$enhanced_cpio_l
 [[ $show_modules_l ]] && show_modules=$show_modules_l
 [[ $nofscks_l ]] && nofscks="yes"
 [[ $ro_mnt_l ]] && ro_mnt="yes"
@@ -1191,14 +1192,14 @@ else
     exit 1
 fi
 
-if [[ $cpio_reflink == "yes" ]]; then
+if [[ $enhanced_cpio == "yes" ]]; then
     dracut_cpio="$dracutbasedir/dracut-cpio"
     if [[ -x $dracut_cpio ]]; then
         # align based on statfs optimal transfer size
         cpio_align=$(stat --file-system -c "%s" -- "$initdir")
     else
-        dinfo "cpio-reflink ignored due to lack of dracut-cpio"
-        unset cpio_reflink
+        dinfo "--enhanced-cpio ignored due to lack of dracut-cpio"
+        unset enhanced_cpio
     fi
 fi
 
@@ -2267,7 +2268,7 @@ fi
 
 if [[ $do_strip == yes ]] && ! [[ $DRACUT_FIPS_MODE ]]; then
     # stripping files negates (dedup) benefits of using reflink
-    [[ -n $cpio_reflink ]] && ddebug "strip is enabled alongside cpio reflink"
+    [[ -n $enhanced_cpio ]] && ddebug "strip is enabled alongside cpio reflink"
     dinfo "*** Stripping files ***"
     find "$initdir" -type f \
         -executable -not -path '*/lib/modules/*.ko' -print0 \
@@ -2338,7 +2339,7 @@ if [[ $create_early_cpio == yes ]]; then
     fi
 
     # The microcode blob is _before_ the initramfs blob, not after
-    if [[ -n $cpio_reflink ]]; then
+    if [[ -n $enhanced_cpio ]]; then
         if ! (
             umask 077
             cd "$early_cpio_dir/d"
@@ -2411,7 +2412,7 @@ case $compress in
         ;;
 esac
 
-if [[ -n $cpio_reflink ]]; then
+if [[ -n $enhanced_cpio ]]; then
     if [[ $compress == "cat" ]]; then
         # dracut-cpio appends by default, so any ucode remains
         cpio_outfile="${DRACUT_TMPDIR}/initramfs.img"
