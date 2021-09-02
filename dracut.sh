@@ -1193,14 +1193,16 @@ else
 fi
 
 if [[ $enhanced_cpio == "yes" ]]; then
-    dracut_cpio="$dracutbasedir/dracut-cpio"
-    if [[ -x $dracut_cpio ]]; then
+    enhanced_cpio="$dracutbasedir/dracut-cpio"
+    if [[ -x $enhanced_cpio ]]; then
         # align based on statfs optimal transfer size
         cpio_align=$(stat --file-system -c "%s" -- "$initdir")
     else
         dinfo "--enhanced-cpio ignored due to lack of dracut-cpio"
         unset enhanced_cpio
     fi
+else
+    unset enhanced_cpio
 fi
 
 # shellcheck disable=SC2154
@@ -2344,7 +2346,7 @@ if [[ $create_early_cpio == yes ]]; then
             umask 077
             cd "$early_cpio_dir/d"
             find . -print0 | sort -z \
-                | $dracut_cpio --null ${cpio_owner:+--owner "$cpio_owner"} \
+                | $enhanced_cpio --null ${cpio_owner:+--owner "$cpio_owner"} \
                     --mtime 0 --data-align "$cpio_align" --truncate-existing \
                     "${DRACUT_TMPDIR}/initramfs.img"
         ); then
@@ -2426,7 +2428,7 @@ if [[ -n $enhanced_cpio ]]; then
         umask 077
         cd "$initdir"
         find . -print0 | sort -z \
-            | $dracut_cpio --null ${cpio_owner:+--owner "$cpio_owner"} \
+            | $enhanced_cpio --null ${cpio_owner:+--owner "$cpio_owner"} \
                 --mtime 0 --data-align "$cpio_align" "$cpio_outfile" || exit 1
         [[ $compress == "cat" ]] && exit 0
         $compress < "$cpio_outfile" >> "${DRACUT_TMPDIR}/initramfs.img" \
