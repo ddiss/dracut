@@ -2266,8 +2266,8 @@ if dracut_module_included "squash"; then
 fi
 
 if [[ $do_strip == yes ]] && ! [[ $DRACUT_FIPS_MODE ]]; then
-    # warn that stripping files negates (dedup) benefits of using reflink
-    [ -n "$cpio_reflink" ] && dinfo "inefficient: strip is enabled alongside cpio reflink"
+    # stripping files negates (dedup) benefits of using reflink
+    [[ -n $cpio_reflink ]] && ddebug "strip is enabled alongside cpio reflink"
     dinfo "*** Stripping files ***"
     find "$initdir" -type f \
         -executable -not -path '*/lib/modules/*.ko' -print0 \
@@ -2347,7 +2347,7 @@ if [[ $create_early_cpio == yes ]]; then
                     --mtime 0 --data-align "$cpio_align" --truncate-existing \
                     "${DRACUT_TMPDIR}/initramfs.img"
         ); then
-            dfatal "dracut: creation of reflinked $outfile failed"
+            dfatal "dracut-cpio: creation of $outfile failed"
             exit 1
         fi
     else
