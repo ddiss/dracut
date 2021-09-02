@@ -2411,21 +2411,31 @@ case $compress in
         ;;
 esac
 
-if [[ -n $cpio_reflink && $compress == "cat" ]]; then
-    # dracut-cpio appends by default, so any ucode remains
+if [[ -n $cpio_reflink ]]; then
+    if [[ $compress == "cat" ]]; then
+        # dracut-cpio appends by default, so any ucode remains
+        cpio_outfile="${DRACUT_TMPDIR}/initramfs.img"
+    else
+        ddebug "$compress compression enabled alongside cpio reflink"
+        # dracut-cpio doesn't output to stdout, so stage for compression
+        cpio_outfile="${DRACUT_TMPDIR}/initramfs.img.uncompressed"
+    fi
+
     if ! (
         umask 077
         cd "$initdir"
         find . -print0 | sort -z \
             | $dracut_cpio --null ${cpio_owner:+--owner "$cpio_owner"} \
-                --mtime 0 --data-align "$cpio_align" \
-                "${DRACUT_TMPDIR}/initramfs.img"
+                --mtime 0 --data-align "$cpio_align" "$cpio_outfile" || exit 1
+        [[ $compress == "cat" ]] && exit 0
+        $compress < "$cpio_outfile" >> "${DRACUT_TMPDIR}/initramfs.img" \
+            && rm "$cpio_outfile"
     ); then
-        dfatal "dracut: creation of reflinked $outfile failed"
+        dfatal "dracut-cpio: creation of $outfile failed"
         exit 1
     fi
+    unset cpio_outfile
 else
-    [ -n "$cpio_reflink" ] && dinfo "cpio-reflink ignored due to compression"
     if ! (
         umask 077
         cd "$initdir"
